@@ -142,8 +142,12 @@ class Project:
             if os.getenv('JIRA_MIGRATION_INCLUDE_COMPONENT_IN_LABELS', 'true') == 'true':
                 labels.append('jira-component:' + component.text.lower())
                 labels.append(component.text.lower())
+                print("Debug: component.text.lower = {component.text.lower()}")
 
-        labels.append(self._jira_type_mapping(item.type.text.lower()))
+        if not hasattr(item, 'labels') or not item.labels:
+            pass
+        else:
+            labels.append(self._jira_type_mapping(item.type.text.lower()))
         
         for label in item.labels.findall('label'):
             converted_label = convert_label(label.text.strip().lower(), self.labels_mapping, self.approved_labels)
