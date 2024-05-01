@@ -105,17 +105,19 @@ class Importer:
         for lkey in self.project.get_all_labels().keys():
 
             prefixed_lkey = lkey.lower()
+            print(f"lkey is: {lkey}")
             # prefix component
             if os.getenv('JIRA_MIGRATION_INCLUDE_COMPONENT_IN_LABELS', 'true') == 'true':
                 if lkey in self.project.get_components().keys():
                     prefixed_lkey = 'jira-component:' + prefixed_lkey
 
-            prefixed_lkey = convert_label(prefixed_lkey, self.labels_mapping, self.approved_labels)
             if prefixed_lkey is None:
                 continue
-
+            prefixed_lkey = convert_label(prefixed_lkey, self.labels_mapping, self.approved_labels)
+            print(f"Prefixed lkey: {prefixed_lkey}")
             data = {'name': prefixed_lkey,
                     'color': colour_selector.get_colour(lkey)}
+            print(f"Data: {data}")
             r = requests.post(label_url, json=data, headers=self.headers, timeout=Importer._DEFAULT_TIME_OUT)
             if r.status_code == 201:
                 print(lkey + '->' + prefixed_lkey)
@@ -174,6 +176,9 @@ class Importer:
         print('Labels', issue['labels'])
         jira_key = issue['key']
         del issue['key']
+
+        print(f"issues: {issue}")
+        print(f"comments: {comments}")
 
         response = self.upload_github_issue(issue, comments)
         status_url = response.json()['url']

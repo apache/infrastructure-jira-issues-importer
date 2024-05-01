@@ -20,7 +20,6 @@ def _map_label(label, labels_mapping):
     else:
         return label
 
-
 def _is_label_approved(label, approved_labels):
     return label in approved_labels
 
