@@ -6,12 +6,14 @@ import glob
 def fetch_labels_mapping():
     with open("labels_mapping.txt") as file:
         entry = [line.split("=") for line in file.readlines()]
-    return {key.strip(): value.strip() for key, value in entry}
+    return {key.strip(): value.strip() for key, value in entry if key or value}
 
 
 def fetch_allowed_labels():
     with open("allowed_labels.txt") as file:
-        return [line.strip('\n') for line in file.readlines()]
+        lines = (line.rstrip() for line in file.readlines())  # strip right-side whitespace
+        lines = (line for line in lines if line) # remove blank lines
+        return lines
 
 
 def _map_label(label, labels_mapping):

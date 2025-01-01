@@ -173,6 +173,7 @@ class Importer:
         Finally the issue github is noted.    
         """
         print('Issue ', issue['key'])
+        issue['labels'] = [label for label in issue['labels'] if label]
         print('Labels', issue['labels'])
         jira_key = issue['key']
         del issue['key']
