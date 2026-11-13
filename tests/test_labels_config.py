@@ -50,3 +50,10 @@ def test_mapping_is_applied_before_allow_list(workdir):
 
 def test_mapping_to_empty_value_drops_label():
     assert convert_label('gsoc2015', {'gsoc2015': ''}, None) is None
+
+
+def test_convert_label_removes_commas_rejected_by_github():
+    assert convert_label('component: build, packaging and test', {}, None) == 'component: build packaging and test'
+    assert convert_label('a,b', {}, None) == 'a b'
+    assert convert_label('x', {'x': 'mapped, label'}, None) == 'mapped label'
+    assert convert_label(',', {}, None) is None

@@ -42,12 +42,20 @@ def _is_label_approved(label, approved_labels):
     return approved_labels is None or label in approved_labels
 
 
+def sanitize_github_label(label):
+    """GitHub rejects label names containing commas, e.g. the Jira component "Build, Packaging and Test"."""
+    return ' '.join(label.replace(',', ' ').split())
+
+
 def convert_label(label, labels_mappings, approved_labels):
-    """Maps a Jira label to its GitHub label; returns None if it is dropped or not allowed."""
+    """
+    Maps a Jira label to its GitHub label; returns None if it is dropped or not allowed.
+    Commas are removed from the result, as GitHub does not allow them in label names.
+    """
     mapped_label = _map_label(label, labels_mappings)
 
     if mapped_label and _is_label_approved(mapped_label, approved_labels):
-        return mapped_label
+        return sanitize_github_label(mapped_label) or None
     return None
 
 
