@@ -32,6 +32,7 @@ def main():
         input('Press any key to begin...')
 
     importer = Importer(config, project)
+    print('Creating issues with the', 'regular Issues API' if importer.api_mode == 'rest' else 'Issue Import API')
     importer.import_milestones()
 
     if config.start_from == 0:

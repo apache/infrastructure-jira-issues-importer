@@ -24,6 +24,7 @@ class Importer:
         self.approved_labels = fetch_allowed_labels(config.allowed_labels_file)
         self.milestone_numbers = {}  # milestone title -> GitHub milestone number
         self._imported_keys = {issue['key'] for issue in project.get_issues()}
+        self.api_mode = config.resolved_github_import_api
 
     def _get_all_pages(self, url):
         """GETs a paginated GitHub list resource, following the Link: rel="next" headers."""
@@ -106,7 +107,10 @@ class Importer:
                 print('Skipping already imported', issue['key'])
                 continue
             print('Index =', count)
-            self.import_issue_with_comments(*self._to_payload(issue))
+            if self.api_mode == 'rest':
+                self.create_issue_with_comments(*self._to_payload(issue))
+            else:
+                self.import_issue_with_comments(*self._to_payload(issue))
 
     def _to_payload(self, issue):
         """Builds the Issue Import API payload (only fields the API accepts) for one issue."""
@@ -160,9 +164,11 @@ class Importer:
                 "following errors:\n{}".format(issue['title'], response.json())
             )
         else:
+            hint = ('\nThe Issue Import API needs a classic token; for a fine-grained token set '
+                    'JIRA_MIGRATION_GITHUB_IMPORT_API=rest.' if response.status_code == 403 else '')
             raise RuntimeError(
-                "Failed to POST issue: '{}' due to unexpected HTTP status code: {}\nerrors:\n{}"
-                .format(issue['title'], response.status_code, response.json())
+                "Failed to POST issue: '{}' due to unexpected HTTP status code: {}\nerrors:\n{}{}"
+                .format(issue['title'], response.status_code, response.json(), hint)
             )
 
     def wait_for_issue_creation(self, status_url):
@@ -202,6 +208,92 @@ class Importer:
                 .format(status)
             )
         return response
+
+    # --- regular REST Issues API (works with fine-grained tokens) ---
+
+    _MAX_RATE_LIMIT_RETRIES = 10
+
+    def _write(self, method, url, json):
+        """
+        Sends a write request, pausing ``github_write_delay`` first. On a (secondary) rate
+        limit it waits as long as GitHub asks (retry-after / x-ratelimit-reset, at least a
+        minute) and retries.
+        """
+        for _ in range(Importer._MAX_RATE_LIMIT_RETRIES):
+            time.sleep(self.config.github_write_delay)
+            response = getattr(requests, method)(url, json=json, headers=self.headers,
+                                                 timeout=Importer._DEFAULT_TIME_OUT)
+            if response.status_code in (403, 429) and self._is_rate_limited(response):
+                wait = self._rate_limit_wait(response)
+                print(f'Rate limited by GitHub, waiting {wait} seconds...')
+                time.sleep(wait)
+                continue
+            return response
+        raise RuntimeError(f'Still rate limited by GitHub after {Importer._MAX_RATE_LIMIT_RETRIES} retries: {url}')
+
+    @staticmethod
+    def _is_rate_limited(response):
+        return ('retry-after' in response.headers or response.headers.get('x-ratelimit-remaining') == '0'
+                or 'rate limit' in (response.text or '').lower())
+
+    @staticmethod
+    def _rate_limit_wait(response):
+        if 'retry-after' in response.headers:
+            return max(int(response.headers['retry-after']), 1)
+        if response.headers.get('x-ratelimit-remaining') == '0' and 'x-ratelimit-reset' in response.headers:
+            return max(int(response.headers['x-ratelimit-reset']) - int(time.time()), 0) + 1
+        return 60
+
+    @staticmethod
+    def _with_original_dates(issue):
+        """The REST API cannot backdate issues, so the original dates are added to the details block."""
+        dates = f'\n<li><b>created</b>: {issue["created_at"]}' if issue.get('created_at') else ''
+        end = '\n</ul></i>\n</details>'
+        body = issue['body']
+        if end in body:
+            index = body.rindex(end)
+            return body[:index] + dates + body[index:]
+        return body + dates
+
+    def create_issue_with_comments(self, jira_key, issue, comments):
+        """
+        Creates a single issue with the regular REST Issues API: the issue, then each comment,
+        then closes it if it is done in Jira. Unlike the Import API this works with fine-grained
+        tokens, but creation dates cannot be set (they are noted in the text instead) and
+        GitHub sends the usual notifications. The "JIRA-KEY:github number" is appended to the
+        mapping output file once the issue is complete.
+        """
+        print('Issue', jira_key, 'labels', issue['labels'], 'comments', len(comments))
+
+        data = {'title': issue['title'], 'body': self._with_original_dates(issue), 'labels': issue['labels']}
+        if 'milestone' in issue:
+            data['milestone'] = issue['milestone']
+        response = self._write('post', self.github_url + '/issues', data)
+        if response.status_code != 201:
+            raise RuntimeError(f"Failed to create issue '{issue['title']}': {response.status_code} {response.text}")
+        number = response.json()['number']
+        html_url = response.json().get('html_url', number)
+
+        for comment in comments:
+            body = comment['body']
+            if comment.get('created_at'):
+                body = f'<i>{comment["created_at"]}</i> ' + body
+            r = self._write('post', f'{self.github_url}/issues/{number}/comments', {'body': body})
+            if r.status_code != 201:
+                raise RuntimeError(f'Failed to add a comment to issue {html_url} ({jira_key}): '
+                                   f'{r.status_code} {r.text}\nRemove the issue before rerunning, '
+                                   f'as it is not in the mapping file yet.')
+
+        if issue.get('closed'):
+            r = self._write('patch', f'{self.github_url}/issues/{number}',
+                            {'state': 'closed', 'state_reason': 'completed'})
+            if r.status_code != 200:
+                raise RuntimeError(f'Failed to close issue {html_url} ({jira_key}): {r.status_code} {r.text}')
+
+        print('Created Issue:', html_url)
+        with open(self.config.mapping_output_file, 'a', encoding='utf-8') as f:
+            f.write(f'{jira_key}:{number}\n')
+        return number
 
     def _issue_href(self, key):
         """

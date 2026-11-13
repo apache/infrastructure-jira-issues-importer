@@ -42,8 +42,14 @@ for a complete example.
   * alternatively, without uv: `pip install -r requirements.txt` (generated via
     `uv export --no-dev --no-hashes -o requirements.txt`)
 * run the tests with `uv run pytest`
-* get a GitHub token with write access to the target repository (classic token with `repo` scope);
-  treat it like a password
+* get a GitHub token with write access to the target repository; treat it like a password
+  * classic token with `repo` scope: issues are created with the Issue Import API, which keeps the
+    original creation, update and close dates and does not send notifications
+  * fine-grained token (Issues: read and write): the Issue Import API rejects these, so the regular
+    Issues API is used (issue, comments one by one, then closing). GitHub shows the import date;
+    the original dates are written into the issue and comment text. Watchers get notified, and
+    GitHub's secondary rate limits (about 80 writes per minute, 500 per hour) make large imports
+    slower; the importer waits and retries when it is rate limited
 
 # Configuration
 
@@ -63,6 +69,8 @@ Variables already set in the environment take precedence over the env file.
 | `JIRA_TOKEN` / `JIRA_USER` + `JIRA_PASSWORD` | | Jira auth (Bearer PAT or basic), for the commenter and non public projects |
 | `GITHUB_NAME` / `GITHUB_REPO` | (required for import) | Target repository owner and name |
 | `GITHUB_ACCESS_TOKEN` | (required for import) | GitHub token |
+| `GITHUB_IMPORT_API` | `auto` | `import` (Issue Import API, classic token, keeps dates), `rest` (regular Issues API, also fine-grained tokens) or `auto` (`rest` for `github_pat_` tokens) |
+| `GITHUB_WRITE_DELAY` | `1.0` | Seconds between write requests in `rest` mode |
 | `GITHUB_API_URL` / `GITHUB_URL` | `https://api.github.com` / `https://github.com` | For GitHub Enterprise |
 | `LABELS_MAPPING_FILE` | `labels_mapping.txt` | `jira candidate=github label` lines, see below |
 | `ALLOWED_LABELS_FILE` | `allowed_labels.txt` | One GitHub label per line; missing file = all labels allowed |

@@ -41,6 +41,12 @@ class Config:
     github_token: str = ''
     github_api_url: str = 'https://api.github.com'
     github_url: str = 'https://github.com'
+    # 'import': Issue Import API (classic tokens only, keeps dates);
+    # 'rest': regular Issues API (works with fine-grained tokens, dates noted in the text);
+    # 'auto': 'rest' for fine-grained tokens (github_pat_...), otherwise 'import'
+    github_import_api: str = 'auto'
+    # pause between write requests of the 'rest' mode, to stay below GitHub's secondary rate limits
+    github_write_delay: float = 1.0
 
     # Labels
     labels_mapping_file: str = 'labels_mapping.txt'
@@ -63,6 +69,15 @@ class Config:
     start_from: int = 0
     mapping_output_file: str = 'jira-keys-to-github-id.txt'
     assume_yes: bool = False
+
+    @property
+    def resolved_github_import_api(self):
+        mode = self.github_import_api.strip().lower()
+        if mode == 'auto':
+            return 'rest' if self.github_token.startswith('github_pat_') else 'import'
+        if mode not in ('import', 'rest'):
+            raise ValueError(f"JIRA_MIGRATION_GITHUB_IMPORT_API must be auto, import or rest, not '{mode}'")
+        return mode
 
     @property
     def jira_url_normalized(self):
@@ -94,6 +109,8 @@ _FIELDS = {
     'github_token': ('GITHUB_ACCESS_TOKEN', str),
     'github_api_url': ('GITHUB_API_URL', str),
     'github_url': ('GITHUB_URL', str),
+    'github_import_api': ('GITHUB_IMPORT_API', str),
+    'github_write_delay': ('GITHUB_WRITE_DELAY', float),
     'labels_mapping_file': ('LABELS_MAPPING_FILE', str),
     'allowed_labels_file': ('ALLOWED_LABELS_FILE', str),
     'include_component_in_labels': ('INCLUDE_COMPONENT_IN_LABELS', _as_bool),
