@@ -93,3 +93,42 @@ def test_comment_date_is_added_to_the_author_header():
     assert Importer._with_comment_date({'body': 'links', 'created_at': '2019-06-12T18:50:52+02:00'}) == \
         '<i>2019-06-12 16:50 UTC</i>\nlinks'
     assert Importer._with_comment_date({'body': 'links'}) == 'links'
+
+
+def test_auto_mode_falls_back_to_rest_when_import_api_is_refused(make_config, sample_xml, fake_http, workdir):
+    config = make_config(github_token='ghp_classic', github_import_api='auto')
+    project = Project(config)
+    for f in read_xml_files(sample_xml):
+        for item in f.channel.item:
+            project.add_item(item)
+    numbers = iter(range(100, 200))
+    fake_http.on('POST', '/issues', lambda url, **kw: FakeResponse(201, {'number': next(numbers)}))
+    fake_http.on('POST', '/comments', lambda url, **kw: FakeResponse(201, {}))
+    fake_http.on('PATCH', '/issues/', lambda url, **kw: FakeResponse(200, {}))
+    # registered last: handlers are matched by URL substring, latest first
+    fake_http.on('POST', '/import/issues', lambda url, **kw: FakeResponse(404, {}, text='Not Found'))
+    importer = Importer(config, project)
+    importer.milestone_numbers = {'1.0.0': 5, '2.0.0': 6}
+    assert importer.api_mode == 'import'
+
+    importer.import_issues(0)
+
+    assert importer.api_mode == 'rest'
+    assert len(fake_http.calls_to('POST', '/import/issues')) == 1
+    assert (workdir / 'jira-keys-to-github-id.txt').read_text().splitlines() == \
+        ['TEST-1:100', 'TEST-2:101', 'TEST-3:102', 'TEST-4:103']
+
+
+@pytest.mark.parametrize('status', [403, 404])
+def test_explicit_import_mode_does_not_fall_back(make_config, sample_xml, fake_http, status):
+    config = make_config(github_token='ghp_classic', github_import_api='import')
+    project = Project(config)
+    for f in read_xml_files(sample_xml):
+        for item in f.channel.item:
+            project.add_item(item)
+    fake_http.on('POST', '/import/issues', lambda url, **kw: FakeResponse(status, {}, text='refused'))
+    importer = Importer(config, project)
+    importer.milestone_numbers = {'1.0.0': 5, '2.0.0': 6}
+    with pytest.raises(RuntimeError, match='GITHUB_IMPORT_API=rest'):
+        importer.import_issues(0)
+    assert all('/import/issues' in c[1] for c in fake_http.calls_to('POST', '/issues'))

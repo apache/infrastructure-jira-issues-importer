@@ -8,6 +8,10 @@ import requests
 from utils import fetch_labels_mapping, fetch_allowed_labels, convert_label
 
 
+class ImportApiUnavailable(RuntimeError):
+    """The Issue Import API refused the token (403/404) before anything was created."""
+
+
 class Importer:
     _DEFAULT_TIME_OUT = 120.0
     _MAX_STATUS_CHECKS = 100
@@ -26,6 +30,7 @@ class Importer:
         self.milestone_numbers = {}  # milestone title -> GitHub milestone number
         self._imported_keys = {issue['key'] for issue in project.get_issues()}
         self.api_mode = config.resolved_github_import_api
+        self._auto_mode = config.github_import_api.strip().lower() == 'auto'
 
     def _get_all_pages(self, url):
         """GETs a paginated GitHub list resource, following the Link: rel="next" headers."""
@@ -108,10 +113,17 @@ class Importer:
                 print('Skipping already imported', issue['key'])
                 continue
             print('Index =', count)
-            if self.api_mode == 'rest':
-                self.create_issue_with_comments(*self._to_payload(issue))
-            else:
-                self.import_issue_with_comments(*self._to_payload(issue))
+            if self.api_mode == 'import':
+                try:
+                    self.import_issue_with_comments(*self._to_payload(issue))
+                    continue
+                except ImportApiUnavailable as e:
+                    if not self._auto_mode:
+                        raise
+                    # e.g. a classic token of a user without admin rights on the repository
+                    print(f'{e}\nSwitching to the regular Issues API for the rest of the import.')
+                    self.api_mode = 'rest'
+            self.create_issue_with_comments(*self._to_payload(issue))
 
     def _to_payload(self, issue):
         """Builds the Issue Import API payload (only fields the API accepts) for one issue."""
@@ -164,12 +176,16 @@ class Importer:
                 "Initial import validation failed for issue '{}' due to the "
                 "following errors:\n{}".format(issue['title'], response.json())
             )
+        elif response.status_code in (403, 404):
+            raise ImportApiUnavailable(
+                "The Issue Import API refused '{}' with HTTP status code {} (it needs a classic token "
+                "with admin rights on the repository); set JIRA_MIGRATION_GITHUB_IMPORT_API=rest to use "
+                "the regular Issues API.\nerrors:\n{}".format(issue['title'], response.status_code, response.text)
+            )
         else:
-            hint = ('\nThe Issue Import API needs a classic token; for a fine-grained token set '
-                    'JIRA_MIGRATION_GITHUB_IMPORT_API=rest.' if response.status_code == 403 else '')
             raise RuntimeError(
-                "Failed to POST issue: '{}' due to unexpected HTTP status code: {}\nerrors:\n{}{}"
-                .format(issue['title'], response.status_code, response.json(), hint)
+                "Failed to POST issue: '{}' due to unexpected HTTP status code: {}\nerrors:\n{}"
+                .format(issue['title'], response.status_code, response.json())
             )
 
     def wait_for_issue_creation(self, status_url):

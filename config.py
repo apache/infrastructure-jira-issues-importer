@@ -43,7 +43,8 @@ class Config:
     github_url: str = 'https://github.com'
     # 'import': Issue Import API (classic tokens only, keeps dates);
     # 'rest': regular Issues API (works with fine-grained tokens, dates noted in the text);
-    # 'auto': 'rest' for fine-grained tokens (github_pat_...), otherwise 'import'
+    # 'auto': 'rest' for fine-grained tokens (github_pat_...), otherwise 'import', switching to
+    # 'rest' if the Import API refuses the token (403/404, e.g. no admin rights on the repository)
     github_import_api: str = 'auto'
     # pause between write requests of the 'rest' mode, to stay below GitHub's secondary rate limits
     github_write_delay: float = 1.0

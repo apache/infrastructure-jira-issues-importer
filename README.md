@@ -72,7 +72,7 @@ ignores unquoted ones. Keep tokens out of the shared env file, e.g. in a second,
 | `JIRA_TOKEN` / `JIRA_USER` + `JIRA_PASSWORD` | | Jira auth (Bearer PAT or basic), for the commenter and non public projects |
 | `GITHUB_NAME` / `GITHUB_REPO` | (required for import) | Target repository owner and name |
 | `GITHUB_ACCESS_TOKEN` | (required for import) | GitHub token |
-| `GITHUB_IMPORT_API` | `auto` | `import` (Issue Import API, classic token, keeps dates), `rest` (regular Issues API, also fine-grained tokens) or `auto` (`rest` for `github_pat_` tokens) |
+| `GITHUB_IMPORT_API` | `auto` | `import` (Issue Import API, classic token, keeps dates), `rest` (regular Issues API, also fine-grained tokens) or `auto` (`rest` for `github_pat_` tokens, and when the Import API refuses the token) |
 | `GITHUB_WRITE_DELAY` | `1.0` | Seconds between write requests in `rest` mode |
 | `GITHUB_API_URL` / `GITHUB_URL` | `https://api.github.com` / `https://github.com` | For GitHub Enterprise |
 | `LABELS_MAPPING_FILE` | `labels_mapping.txt` | `jira candidate=github label` lines, see below |
