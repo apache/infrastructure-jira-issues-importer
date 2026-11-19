@@ -92,9 +92,10 @@ ENV/
 
 *.xml
 
-labels_mapping.txt
-allowed_labels.txt
-jira-keys-to-github-id.txt
+# working files of a migration (root only; examples/ keep theirs)
+/labels_mapping.txt
+/allowed_labels.txt
+/jira-keys-to-github-id*.txt
 
 # test fixtures are synthetic Jira exports
 !tests/fixtures/*.xml

@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from html import escape
 from urllib.parse import quote
 
@@ -255,6 +256,28 @@ class Importer:
             return body[:index] + dates + body[index:]
         return body + dates
 
+    @staticmethod
+    def _format_date(iso):
+        try:
+            return datetime.fromisoformat(iso).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        except ValueError:
+            return iso
+
+    @staticmethod
+    def _with_comment_date(comment):
+        """
+        The REST API cannot backdate comments, so the original date is added to the author
+        header ("<i>author:</i>" becomes "<i>author commented on 2019-06-12 16:50 UTC:</i>").
+        """
+        body = comment['body']
+        if not comment.get('created_at'):
+            return body
+        date = Importer._format_date(comment['created_at'])
+        header_end = body.find(':</i>\n')
+        if body.startswith('<i><a ') and header_end != -1:
+            return body[:header_end] + f' commented on {date}' + body[header_end:]
+        return f'<i>{date}</i>\n' + body
+
     def create_issue_with_comments(self, jira_key, issue, comments):
         """
         Creates a single issue with the regular REST Issues API: the issue, then each comment,
@@ -275,9 +298,7 @@ class Importer:
         html_url = response.json().get('html_url', number)
 
         for comment in comments:
-            body = comment['body']
-            if comment.get('created_at'):
-                body = f'<i>{comment["created_at"]}</i> ' + body
+            body = self._with_comment_date(comment)
             r = self._write('post', f'{self.github_url}/issues/{number}/comments', {'body': body})
             if r.status_code != 201:
                 raise RuntimeError(f'Failed to add a comment to issue {html_url} ({jira_key}): '

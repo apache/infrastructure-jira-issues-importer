@@ -57,7 +57,7 @@ def test_rest_mode_creates_issues_comments_and_closes(rest_setup, fake_http, wor
 
     comments = fake_http.calls_to('POST', '/comments')
     assert comments and all(c[2]['json']['body'] for c in comments)
-    assert any(c[2]['json']['body'].startswith('<i>20') for c in comments)
+    assert any(' commented on 20' in c[2]['json']['body'] and ' UTC:</i>\n' in c[2]['json']['body'] for c in comments)
 
     closes = fake_http.calls_to('PATCH', '/issues/')
     assert [c[1].rsplit('/', 1)[1] for c in closes] == ['103']
@@ -84,3 +84,12 @@ def test_rest_mode_failure_is_reported_without_mapping_entry(rest_setup, fake_ht
     with pytest.raises(RuntimeError, match='Failed to create issue'):
         importer.import_issues(0)
     assert not (workdir / 'jira-keys-to-github-id.txt').exists()
+
+
+def test_comment_date_is_added_to_the_author_header():
+    header = '<i><a href="https://jira/ViewProfile.jspa?name=joe">joe</a>:</i>\ntext'
+    assert Importer._with_comment_date({'body': header, 'created_at': '2019-06-12T16:50:52+00:00'}) == \
+        '<i><a href="https://jira/ViewProfile.jspa?name=joe">joe</a> commented on 2019-06-12 16:50 UTC:</i>\ntext'
+    assert Importer._with_comment_date({'body': 'links', 'created_at': '2019-06-12T18:50:52+02:00'}) == \
+        '<i>2019-06-12 16:50 UTC</i>\nlinks'
+    assert Importer._with_comment_date({'body': 'links'}) == 'links'

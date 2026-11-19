@@ -1,0 +1,38 @@
+# Jira candidate (lower case, see fetch_labels.py) = label in apache/opennlp; empty value drops it.
+# Candidates not listed are created as they are.
+
+# Issue types
+bug=bug
+improvement=improvement
+new feature=new feature
+task=task
+wish=improvement
+test=tests
+brainstorming=
+question=
+# epic: kept as new label "epic" (post_process_issues.sh links the children)
+
+# Components onto the existing "component: ..." labels
+component: build, packaging and test=component: build
+component: command line interface=component: cli
+component: documentation=component: docs
+component: website=component: docs
+component: formats=component: formats
+component: machine learning=component: ml
+component: parser=component: parser
+component: stemmer=component: stemmer
+component: tokenizer=component: tokenizer
+component: uima integration=component: uima
+# not in apache/opennlp yet, created as new labels: chunker, doccat, entity linker, grpc binding,
+# language detector, language model, name finder, pos tagger, sentence detector, similarity, wsd
+
+# Jira labels
+help-wanted=help wanted
+gsoc2015=gsoc
+native-image=graalvm
+wsd=
+java=
+nlp=
+nlp-utils=
+addons=
+# kept as new labels: gsoc, graalvm, spi
