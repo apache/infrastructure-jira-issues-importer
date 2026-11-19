@@ -1,0 +1,23 @@
+[project]
+name = "jira-issues-importer"
+version = "0.1.0"
+description = "Import Jira issues (XML export) into GitHub issues via the GitHub Issue Import API"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "lxml>=5.3",
+    "python-dateutil>=2.9",
+    "requests>=2.32",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,5 @@
+Apache OpenNLP now uses GitHub issues. This issue has been migrated to [{issue_url}].
+
+Please continue the discussion there; this Jira issue will not be updated anymore.
+
+(This is an automated comment.)

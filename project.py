@@ -1,24 +1,78 @@
-import os
+import re
 from collections import defaultdict
-from html.entities import name2codepoint
 from dateutil.parser import parse
 from datetime import datetime
-import re
+from html import escape
+from urllib.parse import quote
 
 from utils import fetch_labels_mapping, fetch_allowed_labels, convert_label
 
 
+def _child(item, name):
+    """Returns the first child element called ``name`` or None if it does not exist."""
+    return item.find(name)
+
+
+def _children(item, path):
+    """Returns all elements matching ``path`` (may be empty)."""
+    return item.findall(path)
+
+
+_VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'wbr'}
+_TAG = re.compile(r'<(/?)([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?(/?)>')
+
+
+def _unclosed_tags(html):
+    stack = []
+    for closing, name, self_closing in _TAG.findall(html):
+        name = name.lower()
+        if self_closing or name in _VOID_TAGS:
+            continue
+        if not closing:
+            stack.append(name)
+        elif name in stack:
+            while stack.pop() != name:
+                pass
+    return stack
+
+
+def truncate_html(text, limit, full_text_url):
+    """
+    Cuts ``text`` to at most ``limit`` characters (GitHub rejects longer bodies/comments),
+    without leaving a partial tag/entity, closes still open tags (e.g. a <pre> block) and
+    appends a note linking to the full text.
+    """
+    if len(text) <= limit:
+        return text
+    note = (f'\n\n<i>[truncated, see the full text in Jira: '
+            f'<a href="{full_text_url}">{escape(full_text_url)}</a>]</i>')
+    budget = limit - len(note)
+    while budget > 0:
+        cut = text[:budget]
+        if cut.rfind('<') > cut.rfind('>'):
+            cut = cut[:cut.rfind('<')]
+        cut = re.sub(r'&#?\w*$', '', cut)
+        closers = ''.join(f'</{name}>' for name in reversed(_unclosed_tags(cut)))
+        result = cut + closers + note
+        if len(result) <= limit:
+            return result
+        budget -= len(result) - limit
+    return note[:limit]
+
+
 class Project:
 
-    def __init__(self, name, doneStatusCategoryId, jiraBaseUrl):
-        self.name = name
-        self.doneStatusCategoryId = doneStatusCategoryId
-        self.jiraBaseUrl = jiraBaseUrl
-        self._project = {'Milestones': defaultdict(int), 'Components': defaultdict(
-            int), 'Labels': defaultdict(int), 'Types': defaultdict(int), 'Issues': []}
+    def __init__(self, config):
+        self.config = config
+        self.name = config.jira_project
+        self.doneStatusCategoryId = str(config.jira_done_id)
+        self.jiraBaseUrl = config.jira_url_normalized
+        self._project = {'Milestones': defaultdict(int), 'Components': defaultdict(int),
+                         'Labels': defaultdict(int), 'Types': defaultdict(int),
+                         'GitHubLabels': defaultdict(int), 'Issues': []}
 
-        self.labels_mapping = fetch_labels_mapping()
-        self.approved_labels = fetch_allowed_labels()
+        self.labels_mapping = fetch_labels_mapping(config.labels_mapping_file)
+        self.approved_labels = fetch_allowed_labels(config.allowed_labels_file)
 
     def get_milestones(self):
         return self._project['Milestones']
@@ -33,16 +87,12 @@ class Project:
         return self._project['Types']
 
     def get_all_labels(self):
-        merge = self._project['Components'].copy()
-        merge.update(self._project['Labels'])
-        merge.update(self._project['Types'])
-        merge.update({'imported-jira-issue': 0})
-        return merge
+        """The final GitHub labels (after mapping and allow list) with their usage count."""
+        return self._project['GitHubLabels']
 
     def get_labels(self):
-        merge = self._project['Labels'].copy()
-        merge.update({'imported-jira-issue': 0})
-        return merge
+        """The raw Jira labels (lower-cased, i.e. mapping file keys) with their usage count."""
+        return self._project['Labels']
 
     def add_item(self, item):
         itemProject = self._projectFor(item)
@@ -57,10 +107,6 @@ class Project:
 
         self._add_labels(item)
 
-        self._add_subtasks(item)
-
-        self._add_parenttask(item)
-
         self._add_comments(item)
 
         self._add_relationships(item)
@@ -69,7 +115,7 @@ class Project:
         def hist(h):
             for key in h.keys():
                 print(('%30s (%5d): ' + h[key] * '#') % (key, h[key]))
-            print
+            print()
 
         print(self.name + ':\n  Milestones:')
         hist(self._project['Milestones'])
@@ -79,7 +125,8 @@ class Project:
         hist(self._project['Components'])
         print('  Labels:')
         hist(self._project['Labels'])
-        print
+        print('  GitHub labels (after mapping):')
+        hist(self._project['GitHubLabels'])
         print('Total Issues to Import: %d' % len(self._project['Issues']))
 
     def _projectFor(self, item):
@@ -89,74 +136,53 @@ class Project:
             result = item.key.text.split('-')[0]
         return result
 
-    def _append_item_to_project(self, item):
-        # todo assignee
-        closed = str(item.statusCategory.get('id')) == self.doneStatusCategoryId
-        closed_at = ''
-        if closed:
-            try:
-                closed_at = self._convert_to_iso(item.resolved.text)
-            except AttributeError:
-                pass
+    def _user_link(self, user):
+        username = user.get('username') or str(user)
+        return ('<a title="' + escape(str(user)) + '" href="' + self.jiraBaseUrl
+                + '/secure/ViewProfile.jspa?name=' + quote(username) + '">' + escape(username) + '</a>')
 
-        # TODO: ensure item.assignee/reporter.get('username') to avoid "JENKINSUSER12345"
-        # TODO: fixit in gh issues
-        # check if issue description is missing or empty and set a default
-        if not hasattr(item, 'description') or not item.description:
-            item.description = 'No Description'
-        body = self._htmlentitydecode(item.description.text)
+    def _append_item_to_project(self, item):
+        closed = str(item.statusCategory.get('id')) == self.doneStatusCategoryId
+        resolved = _child(item, 'resolved')
+        closed_at = ''
+        if closed and resolved is not None and resolved.text:
+            closed_at = self._convert_to_iso(resolved.text)
+
+        description = _child(item, 'description')
+        if description is None or not (description.text or '').strip():
+            description_html = 'No Description'
+        else:
+            description_html = self._htmlentitydecode(description.text)
 
         # metadata: original author & link
-
-        body = body + '\n\n---\n<details><summary><i>Originally reported by <a title="' + str(item.reporter) + '" href="' + self.jiraBaseUrl + '/secure/ViewProfile.jspa?name=' + item.reporter.get('username') + '">' + item.reporter.get('username') + '</a>, imported from: <a href="' + self.jiraBaseUrl + '/browse/' + item.key.text + '" target="_blank">' + item.title.text[item.title.text.index("]") + 2:len(item.title.text)] + '</a></i></summary>'
-        # metadata: assignee
+        summary = item.title.text[item.title.text.index("]") + 2:]
+        reporter = _child(item, 'reporter')
+        body = '\n\n---\n<details><summary><i>'
+        if reporter is not None:
+            body = body + 'Originally reported by ' + self._user_link(reporter) + ', '
+        body = body + 'imported from: <a href="' + self.jiraBaseUrl + '/browse/' + item.key.text + '" target="_blank">' + escape(summary) + '</a></i></summary>'
         body = body + '\n<i><ul>'
-        if item.assignee != 'Unassigned':
-            body = body + '\n<li><b>assignee</b>: <a title="' + str(item.assignee) + '" href="' + self.jiraBaseUrl + '/secure/ViewProfile.jspa?name=' + item.assignee.get('username') + '">' + item.assignee.get('username') + '</a>'
-        try:
-            body = body + '\n<li><b>status</b>: ' + item.status
-        except AttributeError:
-            pass
-        try:
-            body = body + '\n<li><b>priority</b>: ' + item.priority
-        except AttributeError:
-            pass
-        try:
-            body = body + '\n<li><b>resolution</b>: ' + item.resolution
-        except AttributeError:
-            pass
-        try:
-            body = body + '\n<li><b>resolved</b>: ' + self._convert_to_iso(item.resolved.text)
-        except AttributeError:
-            pass
+
+        assignee = _child(item, 'assignee')
+        if assignee is not None and assignee.get('username') not in (None, '-1'):
+            body = body + '\n<li><b>assignee</b>: ' + self._user_link(assignee)
+        for field in ('status', 'priority', 'resolution'):
+            value = _child(item, field)
+            if value is not None and value.text:
+                body = body + '\n<li><b>' + field + '</b>: ' + escape(value.text)
+        if resolved is not None and resolved.text:
+            body = body + '\n<li><b>resolved</b>: ' + self._convert_to_iso(resolved.text)
+        attachments = [a for a in _children(item, 'attachments/attachment') if a.get('id') and a.get('name')]
+        if attachments:
+            body = body + '\n<li><b>attachments</b>: ' + ', '.join(
+                '<a href="' + self.jiraBaseUrl + '/secure/attachment/' + quote(a.get('id')) + '/' + quote(a.get('name'))
+                + '">' + escape(a.get('name')) + '</a>' for a in attachments)
         body = body + '\n<li><b>imported</b>: ' + datetime.today().strftime('%Y-%m-%d')
         body = body + '\n</ul></i>\n</details>'
+        issue_url = self.jiraBaseUrl + '/browse/' + item.key.text
+        body = truncate_html(description_html, self.config.max_text_length - len(body), issue_url) + body
 
-        # retrieve jira components and labels as github labels
-        labels = []
-
-        # set a default component if empty or missing
-        if not hasattr(item, 'component') or not item.component:
-            item.component = 'miscellaneous'
-        for component in item.component:
-            if os.getenv('JIRA_MIGRATION_INCLUDE_COMPONENT_IN_LABELS', 'true') == 'true':
-                labels.append('jira-component:' + component.text.lower())
-                labels.append(component.text.lower())
-                print("Debug: component.text.lower = {component.text.lower()}")
-
-        if not hasattr(item, 'labels') or not item.labels:
-            pass
-        else:
-            labels.append(self._jira_type_mapping(item.type.text.lower()))
-        
-        for label in item.labels.findall('label'):
-            converted_label = convert_label(label.text.strip().lower(), self.labels_mapping, self.approved_labels)
-            if converted_label is not None:
-                labels.append(converted_label)
-
-        labels.append('imported-jira-issue')
-
-        unique_labels = list(set(labels))
+        unique_labels = self._github_labels(item)
 
         self._project['Issues'].append({'title': item.title.text,
                                         'key': item.key.text,
@@ -167,143 +193,111 @@ class Project:
                                         'closed': closed,
                                         'labels': unique_labels,
                                         'comments': [],
-                                        'duplicates': [],
-                                        'is-duplicated-by': [],
-                                        'is-related-to': [],
-                                        'depends-on': [],
-                                        'blocks': []
+                                        'links': []
                                         })
         if not self._project['Issues'][-1]['closed_at']:
             del self._project['Issues'][-1]['closed_at']
 
-    def _jira_type_mapping(self, issue_type):
-        if issue_type == 'bug':
-            return 'bug'
-        if issue_type == 'improvement':
-            return 'rfe'
-        if issue_type == 'new feature':
-            return 'rfe'
-        if issue_type == 'task':
-            return 'rfe'
-        if issue_type == 'story':
-            return 'rfe'
-        if issue_type == 'patch':
-            return 'rfe'
-        if issue_type == 'epic':
-            return 'epic'
+    def label_candidates(self, item):
+        """
+        Returns the (kind, candidate label) pairs of an item before mapping. The candidate is
+        what has to be used as key in the labels mapping file:
+        the lower-cased issue type, the configured component prefix plus the lower-cased
+        component, and the lower-cased Jira label.
+        """
+        candidates = []
+        issue_type = _child(item, 'type')
+        if issue_type is not None and issue_type.text:
+            candidates.append(('type', issue_type.text.strip().lower()))
+        if self.config.include_component_in_labels:
+            for component in _children(item, 'component'):
+                if component.text and component.text.strip():
+                    candidates.append(('component', self.config.component_label_prefix + component.text.strip().lower()))
+        for label in _children(item, 'labels/label'):
+            if label.text and label.text.strip():
+                candidates.append(('label', label.text.strip().lower()))
+        return candidates
+
+    def _github_labels(self, item):
+        """Maps the item's type, components and labels to the final GitHub labels."""
+        labels = []
+        for _, candidate in self.label_candidates(item):
+            converted = convert_label(candidate, self.labels_mapping, self.approved_labels)
+            if converted and converted not in labels:
+                labels.append(converted)
+        if self.config.imported_label and self.config.imported_label not in labels:
+            labels.append(self.config.imported_label)
+        for label in labels:
+            self._project['GitHubLabels'][label] += 1
+        return labels
 
     def _convert_to_iso(self, timestamp):
         dt = parse(timestamp)
         return dt.isoformat()
 
     def _add_milestone(self, item):
-        try:
-            self._project['Milestones'][item.fixVersion.text] += 1
-            # this prop will be deleted later:
-            self._project['Issues'][-1]['milestone_name'] = item.fixVersion.text.trim()
-        except AttributeError:
-            pass
+        # GitHub supports a single milestone per issue, so the first fixVersion is used
+        versions = [v.text.strip() for v in _children(item, 'fixVersion') if v.text and v.text.strip()]
+        if versions:
+            self._project['Milestones'][versions[0]] += 1
+            # this prop will be replaced by the GitHub milestone number later:
+            self._project['Issues'][-1]['milestone_name'] = versions[0]
 
     def _add_labels(self, item):
-        try:
-            self._project['Components'][item.component.text] += 1
-            tmp_l = item.component.text.trim()
-            if tmp_l == 'Bug':
-                tmp_l = 'bug'
-
-            self._project['Issues'][-1]['labels'].append(tmp_l)
-        except AttributeError:
-            pass
-        
-        try:
-            for label in item.labels.label:
-                self._project['Labels'][label.text] += 1
-                tmp_l = label.text.trim()
-                if tmp_l == 'Bug':
-                    tmp_l = 'bug'
-
-                self._project['Issues'][-1]['labels'].append(tmp_l)
-        except AttributeError:
-            pass
-
-        try:
-            self._project['Types'][item.type.text] += 1
-            tmp_l = item.type.text.trim()
-            if tmp_l == 'Bug':
-                tmp_l = 'bug'
-
-            self._project['Issues'][-1]['labels'].append(tmp_l)
-        except AttributeError:
-            pass
-
-    def _add_subtasks(self, item):
-        try:
-            subtaskList = ''
-            for subtask in item.subtasks.subtask:
-                subtaskList = subtaskList + '- ' + subtask + '\n'
-            if subtaskList != '':
-                print('-> subtaskList: ' + subtaskList)
-                self._project['Issues'][-1]['comments'].append(
-                    {"created_at": self._convert_to_iso(item.created.text),
-                     "body": 'Subtasks:\n\n' + subtaskList})
-        except AttributeError:
-            pass
-
-    def _add_parenttask(self, item):
-        try:
-            parentTask = item.parent.text
-            if parentTask != '':
-                print('-> parentTask: ' + parentTask)
-                self._project['Issues'][-1]['comments'].append(
-                    {"created_at": self._convert_to_iso(item.created.text),
-                     "body": 'Subtask of parent task ' + parentTask})
-        except AttributeError:
-            pass
+        """Collects the raw Jira types, components and labels for the overview (prettify)."""
+        kinds = {'type': 'Types', 'component': 'Components', 'label': 'Labels'}
+        for kind, candidate in self.label_candidates(item):
+            self._project[kinds[kind]][candidate] += 1
 
     def _add_comments(self, item):
-        try:
-            for comment in item.comments.comment:
-                self._project['Issues'][-1]['comments'].append(
-                    {"created_at": self._convert_to_iso(comment.get('created')),
-                     "body": '<i><a href="' + self.jiraBaseUrl + '/secure/ViewProfile.jspa?name=' + comment.get('author') + '">' + comment.get('author') + '</a>:</i>\n' + self._htmlentitydecode(comment.text)
-                     })
-        except AttributeError:
-            pass
+        issue_url = self.jiraBaseUrl + '/browse/' + item.key.text
+        for comment in _children(item, 'comments/comment'):
+            author = comment.get('author') or 'unknown'
+            if author in self.config.skip_comment_authors:
+                continue
+            header = ('<i><a href="' + self.jiraBaseUrl + '/secure/ViewProfile.jspa?name=' + quote(author) + '">'
+                      + escape(author) + '</a>:</i>\n')
+            comment_url = issue_url + '?focusedCommentId=' + str(comment.get('id')) + '#comment-' + str(comment.get('id'))
+            text = truncate_html(self._htmlentitydecode(comment.text),
+                                 self.config.max_text_length - len(header), comment_url)
+            self._project['Issues'][-1]['comments'].append(
+                {"created_at": self._convert_to_iso(comment.get('created')), "body": header + text})
 
     def _add_relationships(self, item):
-        try:
-            for issuelinktype in item.issuelinks.issuelinktype:
-                for outwardlink in issuelinktype.outwardlinks:
-                    for issuelink in outwardlink.issuelink:
-                        for issuekey in issuelink.issuekey:
-                            tmp_outward = outwardlink.get("description").replace(' ', '-')
-                            if tmp_outward in self._project['Issues'][-1]:
-                                self._project['Issues'][-1][tmp_outward].append(issuekey.text)
-        except AttributeError:
-            pass
-        except KeyError:
-            print('1. KeyError at ' + item.key.text)
-        try:
-            for issuelinktype in item.issuelinks.issuelinktype:
-                for inwardlink in issuelinktype.inwardlinks:
-                    for issuelink in inwardlink.issuelink:
-                        for issuekey in issuelink.issuekey:
-                            tmp_inward = inwardlink.get("description").replace(' ', '-')
-                            if tmp_inward in self._project['Issues'][-1]:
-                                self._project['Issues'][-1][tmp_inward].append(issuekey.text)
-        except AttributeError:
-            pass
-        except KeyError:
-            print('2. KeyError at ' + item.key.text)
+        """
+        Collects all Jira issue links (any link type, outward and inward, using Jira's link
+        description such as "blocks" or "is blocked by"), subtasks, the parent task and the
+        epic link.
+        """
+        links = self._project['Issues'][-1]['links']
+        # Jira's order: per link type, outward before inward
+        for linktype in _children(item, 'issuelinks/issuelinktype'):
+            for direction in ('outwardlinks', 'inwardlinks'):
+                for group in _children(linktype, direction):
+                    description = (group.get('description') or linktype.findtext('name') or 'links to').strip()
+                    for issuekey in _children(group, 'issuelink/issuekey'):
+                        links.append((description, issuekey.text.strip()))
 
-        for customfield in item.customfields.findall('customfield'):
+        for subtask in _children(item, 'subtasks/subtask'):
+            if subtask.text and subtask.text.strip():
+                links.append(('has subtask', subtask.text.strip()))
+        parent = _child(item, 'parent')
+        if parent is not None and parent.text and parent.text.strip():
+            links.append(('is subtask of', parent.text.strip()))
+
+        for customfield in _children(item, 'customfields/customfield'):
             if customfield.get('key') == 'com.pyxis.greenhopper.jira:gh-epic-link':
-                epic_key = customfield.customfieldvalues.customfieldvalue
-                self._project['Issues'][-1]['epic-link'] = epic_key
+                epic_key = customfield.findtext('customfieldvalues/customfieldvalue')
+                if epic_key and epic_key.strip():
+                    self._project['Issues'][-1]['epic-link'] = epic_key.strip()
 
     def _htmlentitydecode(self, s):
+        """
+        Prepares Jira's HTML for GitHub. The text already is HTML, so entities must stay
+        encoded (decoding would turn escaped code like List&lt;String&gt; into tags).
+        Runs of 8 spaces (Jira's export indentation) are removed so GitHub's Markdown
+        renderer does not turn them into code blocks.
+        """
         if s is None:
             return ''
-        s = s.replace(' ' * 8, '')
-        return re.sub('&(%s);' % '|'.join(name2codepoint),
-                      lambda m: chr(name2codepoint[m.group(1)]), s)
+        return s.replace(' ' * 8, '')

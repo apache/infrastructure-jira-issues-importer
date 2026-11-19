@@ -1,47 +1,57 @@
 #!/usr/bin/env python3
+"""
+Downloads the Jira issues matching JIRA_MIGRATION_JQL_QUERY as XML search request exports
+(one file per page) into JIRA_MIGRATION_JIRA_OUTPUT_DIR (default: jira_output).
+
+Example (only open issues):
+  JIRA_MIGRATION_JQL_QUERY='project = OPENNLP AND resolution = Unresolved ORDER BY key ASC'
+"""
 
 import os
-import urllib.parse
-# noinspection PyUnresolvedReferences
-from lxml import etree, objectify
+from urllib.parse import quote
 
 import requests
-from math import ceil
+from lxml import etree, objectify
 
-jira_server = os.getenv('JIRA_MIGRATION_JIRA_URL', 'https://issues.jenkins.io')
-jql_query = os.getenv('JIRA_MIGRATION_JQL_QUERY')
-file_path = 'jira_output'
+from config import load_config
 
-encoded_query = urllib.parse.quote(jql_query)
-pager = 0
+_TIME_OUT = 120.0
 
 
-def fetch_total_results():
-    """
-    Load one result from query to see how many results there will be to calculate pagination.
-    """
-    global max_results, url, response, total_results
-    max_results = 1
-    url = f'{jira_server}/sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?jqlQuery={encoded_query}&tempMax={max_results}&pager/start={max_results}'
-    response = requests.get(url)
-    result = objectify.fromstring(response.text)
-    return int(result.channel.issue.attrib['total'])
+def _headers(config):
+    if config.jira_token:
+        return {'Authorization': f'Bearer {config.jira_token}'}
+    return {}
 
 
-total_results = fetch_total_results()
-total_pages = ceil(total_results / 1000)
+def _fetch_page(config, start, size):
+    url = (f'{config.jira_url_normalized}/sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml'
+           f'?jqlQuery={quote(config.jql_query)}&tempMax={size}&pager/start={start}')
+    auth = (config.jira_user, config.jira_password) if config.jira_user and not config.jira_token else None
+    response = requests.get(url, headers=_headers(config), auth=auth, timeout=_TIME_OUT)
+    if response.status_code != 200:
+        raise RuntimeError(f'Jira returned {response.status_code} for {url}:\n{response.text[:1000]}')
+    return objectify.fromstring(response.text.encode('utf-8'))
 
-max_results = 1000
 
-while pager < total_results:
-    page_number = ceil(pager / 1000 + 1)
-    print(f'Fetching page {page_number}, out of {total_pages}')
-    url = f'{jira_server}/sr/jira.issueviews:searchrequest-xml/temp/SearchRequest.xml?jqlQuery={encoded_query}&tempMax={max_results}&pager/start={pager}'
-    response = requests.get(url)
-    root = objectify.fromstring(response.text)
+def fetch(config):
+    """Fetches all pages and returns the written file paths."""
+    os.makedirs(config.jira_output_dir, exist_ok=True)
 
-    with open(f'{file_path}/result-{pager}.xml', 'wb') as doc:
-        doc.write(etree.tostring(root, pretty_print=True))
-    pager += 1000
+    total = int(_fetch_page(config, 0, 1).channel.issue.get('total'))
+    print(f'{total} issues match: {config.jql_query}')
 
-print('Complete')
+    files = []
+    for start in range(0, total, config.jira_page_size):
+        print(f'Fetching issues {start + 1}-{min(start + config.jira_page_size, total)} of {total}')
+        root = _fetch_page(config, start, config.jira_page_size)
+        path = os.path.join(config.jira_output_dir, f'result-{start}.xml')
+        with open(path, 'wb') as doc:
+            doc.write(etree.tostring(root, pretty_print=True))
+        files.append(path)
+    print('Complete')
+    return files
+
+
+if __name__ == '__main__':
+    fetch(load_config(required=('jql_query',)))

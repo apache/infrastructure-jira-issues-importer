@@ -1,15 +1,18 @@
 class LabelColourSelector:
+    """Picks the colour for newly created GitHub labels (existing labels are not changed)."""
+
+    _COLOURS = {
+        'bug': 'ee4035',
+        'epic': 'ddf4dd',
+    }
+    _ENHANCEMENT = ('rfe', 'story', 'enhancement', 'improvement', 'new feature', 'feature')
+    _DEFAULT = 'ededed'
+
     def __init__(self, project):
         self._project = project
 
     def get_colour(self, label):
-        if label in ('rfe', 'story'):
+        label = label.lower()
+        if label in self._ENHANCEMENT:
             return '7bc043'
-        elif label == 'bug':
-            return 'ee4035'
-        elif label == 'epic':
-            return 'ddf4dd'
-        # elif (label in self._project.get_components()): return 'fdf498'
-        # elif (label.replace('component:', '') in self._project.get_components()): return 'fdf498'
-        else:
-            return 'ededed'
+        return self._COLOURS.get(label, self._DEFAULT)

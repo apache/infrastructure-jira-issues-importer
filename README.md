@@ -1,76 +1,139 @@
 # JIRA issues importer
 
-Python 3.x scripts for importing JIRA issues in XML format into an existing Github project without existing issues
+Python scripts for importing Jira issues (XML search request export) into GitHub issues of an
+existing repository, using the GitHub Issue Import API.
+
+Everything project specific lives in configuration (environment variables, label mapping,
+comment template), so a migration needs no code changes. See [`examples/opennlp`](examples/opennlp)
+for a complete example.
 
 # Features
 
-* Import JIRA milestones as Github milestones
-* Import JIRA labels as Github labels
-* Import JIRA components as Github labels
-* Configure colour scheme for labelling on import
-* Import multiple files to help overcome the export limit of 1000 (export multiple files by by using the JIRA key column as a range)
-* Import JIRA issues as Github issues where
-  * issue ids are mapped one by one, e.g. PROJECT-1 becomes GH-1 and PROJECT-4711 becomes GH-4711
-  * both issue label and component assignments are mapped to Github labels
-  * issue relationships like "depends on", "blocks" or "duplicates" are mapped to special Github comments
-  * issue timestamps such as creation, close or update date are considered
-  * issue states (open or closed) are considered
-  * issue comments are mapped to Github comments
-    * JIRA issue references in normal and relationship comments are replaced by references to the Github issue id  
+* Fetch Jira issues for any JQL query (e.g. only open issues) as XML, paginated
+* Import Jira fix versions as GitHub milestones (existing milestones are reused by title)
+* Import Jira issue types, components and labels as GitHub labels, mapped through a mapping file
+  and an optional allow list (existing labels are reused)
+* Import Jira issues as GitHub issues where
+  * the title keeps the Jira key, e.g. `[PROJECT-123] Summary`
+  * the body keeps the Jira description, followed by a collapsible block with reporter, assignee,
+    status, priority, resolution, attachments (linked to Jira) and a link to the Jira issue
+  * creation, update and close dates and the open/closed state are preserved
+  * comments are imported with their original author (as text) and date; comments of selected
+    users (e.g. bots) can be skipped
+  * all Jira issue links (any link type), subtasks and the parent task are listed in a comment,
+    linking to the GitHub issue when it is part of the import, otherwise to Jira
+  * epic links are kept as `[Epic: KEY]` comment, `post_process_issues.sh` adds the children to the epic
+  * texts longer than GitHub's limit are truncated with a link to the full text in Jira
+* Resumable: a `JIRA-KEY:github number` mapping file is written, a rerun skips imported issues
+* Comment on the migrated Jira issues with a link to the new GitHub issue (`jira_commenter.py`)
 
 # Caveats
- * this project does not try to map JIRA users to Github users
-   * the Github user (based on the personal access token used) which performs the import will appear as issue creator, the original JIRA issue reporter is noted in the first comment
-   * the Github user which performs the import will also appear as comment creator, as the Github API doesn't support that (yet),
-     the original JIRA commentator is noted in the comment text
 
-# Assumptions and prerequisites
+* Jira users are not mapped to GitHub users. The owner of the GitHub token appears as author of all
+  issues and comments; the original Jira reporter, assignee and comment authors are noted in the text.
+* Attachments cannot be uploaded with the Import API; they are linked to Jira.
+* GitHub issue numbers differ from the Jira numbers (the repository may already contain issues and
+  pull requests). The Jira key stays in the title, so issues can be found by key.
+* Watchers, votes and work logs are not migrated.
 
-* use these scripts at your own risk, no warranties for a correct and successful migration are given
-* it's recommended to test your issue migration first with a test project on Github
-* input to the import script is the XML export file of your JIRA project, see below
-* works with JIRA Cloud, as of March 2019
-* your target Github project should already exist with the issue tracker enabled
-* there should be no existing issues and pull requests - else the issue id mapping will be incorrect
+# Setup
 
-# Getting started
+* install [uv](https://docs.astral.sh/uv/) and run `uv sync`
+  * alternatively, without uv: `pip install -r requirements.txt` (generated via
+    `uv export --no-dev --no-hashes -o requirements.txt`)
+* run the tests with `uv run pytest`
+* get a GitHub token with write access to the target repository; treat it like a password
+  * classic token with `repo` scope: issues are created with the Issue Import API, which keeps the
+    original creation, update and close dates and does not send notifications
+  * fine-grained token (Issues: read and write): the Issue Import API rejects these, so the regular
+    Issues API is used (issue, comments one by one, then closing). GitHub shows the import date;
+    the original dates are written into the issue and comment text. Watchers get notified, and
+    GitHub's secondary rate limits (about 80 writes per minute, 500 per hour) make large imports
+    slower; the importer waits and retries when it is rate limited
 
-## Setup
+# Configuration
 
-* clone this repository
-* run `pip install -r requirements.txt`
-* edit the `labelcolourselector.py` if you want to change the logic of how the colours are set on labels
-* [create a personal access token in GitHub](https://docs.github.com/en/github/authenticating-to-github/creating-a-personal-access-token) (Be sure to save the token somewhere safe; you will have to enter it later. **Warning:** Treat your tokens like passwords and keep them secret.)
+All settings are environment variables; required ones that are missing are asked for interactively.
+Put the non-secret ones in an env file and run the scripts with `uv run --env-file <file> <script>`.
+Variables already set in the environment take precedence over the env file.
+Quote values containing spaces (`JIRA_MIGRATION_JIRA_CLOSE_TRANSITION="Close Issue"`): uv silently
+ignores unquoted ones. Keep tokens out of the shared env file, e.g. in a second, git-ignored
+`*.local.env` file passed after it (`--env-file my.env --env-file my.local.env`; later files win).
 
-## Running the tool
+| Variable (`JIRA_MIGRATION_` prefix) | Default | Description |
+|---|---|---|
+| `JIRA_URL` | (required) | Jira base URL, e.g. `https://issues.apache.org/jira` |
+| `JIRA_PROJECT_NAME` | (required) | Jira project key; items of other projects are skipped |
+| `JQL_QUERY` | | Query for `fetch_issues.py`, e.g. `project = X AND resolution = Unresolved ORDER BY key ASC` |
+| `JIRA_OUTPUT_DIR` | `jira_output` | Where `fetch_issues.py` writes the XML files |
+| `JIRA_PAGE_SIZE` | `1000` | Issues per XML file |
+| `FILE_PATHS` | | XML files / directories to import (`;` separated) |
+| `JIRA_DONE_ID` | `3` | `statusCategory` id meaning "done" (closed on GitHub) |
+| `JIRA_TOKEN` / `JIRA_USER` + `JIRA_PASSWORD` | | Jira auth (Bearer PAT or basic), for the commenter and non public projects |
+| `GITHUB_NAME` / `GITHUB_REPO` | (required for import) | Target repository owner and name |
+| `GITHUB_ACCESS_TOKEN` | (required for import) | GitHub token |
+| `GITHUB_IMPORT_API` | `auto` | `import` (Issue Import API, classic token, keeps dates), `rest` (regular Issues API, also fine-grained tokens) or `auto` (`rest` for `github_pat_` tokens, and when the Import API refuses the token) |
+| `GITHUB_WRITE_DELAY` | `1.0` | Seconds between write requests in `rest` mode |
+| `GITHUB_API_URL` / `GITHUB_URL` | `https://api.github.com` / `https://github.com` | For GitHub Enterprise |
+| `LABELS_MAPPING_FILE` | `labels_mapping.txt` | `jira candidate=github label` lines, see below |
+| `ALLOWED_LABELS_FILE` | `allowed_labels.txt` | One GitHub label per line; missing file = all labels allowed |
+| `INCLUDE_COMPONENT_IN_LABELS` | `true` | Turn components into labels |
+| `COMPONENT_LABEL_PREFIX` | `jira-component:` | Prefix for component labels (may be empty) |
+| `IMPORTED_LABEL` | `imported-jira-issue` | Label added to every imported issue (empty = none) |
+| `SKIP_COMMENT_AUTHORS` | | Comma separated Jira users whose comments are not migrated |
+| `MAX_TEXT_LENGTH` | `60000` | Longer descriptions/comments are truncated (GitHub limit: 65536) |
+| `MAPPING_OUTPUT_FILE` | `jira-keys-to-github-id.txt` | `JIRA-KEY:number` lines written by the import |
+| `JIRA_COMMENT_TEMPLATE_FILE` | built-in text | Comment for `jira_commenter.py`; placeholders `{key}`, `{issue_number}`, `{issue_url}`, `{repo_url}` |
+| `JIRA_CLOSE_TRANSITION` | | If set (e.g. `Close Issue`), `jira_commenter.py` also closes each issue, with the comment in the same request |
+| `JIRA_CLOSE_RESOLUTION` | | Resolution for that transition, e.g. `Auto Closed` |
+| `START_FROM` | `0` | Skip the first N issues (normally not needed, reruns skip imported issues) |
+| `ASSUME_YES` | `false` | Do not wait for confirmation before importing |
 
-* export the desired JIRA issues of your project ([see section below](#export-jira-issues))
-* to start the Github import, execute `python main.py`
-* on startup it will ask for
-  * the JIRA XML export file name (use a semi-colon to enter multiple XML paths)
-  * the JIRA project name
-  * the `<statusCategoryId>` element's `id` attribute that signifies an issue as Done (this is an integer)
-  * the Github account name that owns the repository (user or organization)
-  * the target Github repository name
-  * the Github [personal access token](https://github.com/settings/tokens) for authentication
-  * the index at which to start from, enter 0 to begin, if you have a failure, enter the index number the import failed at. Entering a number higher than 0 will stop labels from re-importing and milestones will re-match to existing.
-* the import process will then
-  * read the JIRA XML export file and create an in-memory project representation of the xml file contents
-  * import the milestones with the regular [Github Milestone API](https://developer.github.com/v3/issues/milestones/)
-  * import the labels with the regular [Github Label API](https://developer.github.com/v3/issues/labels/)
-  * import the issues with comments with the [Github Import API](https://gist.github.com/jonmagic/5282384165e0f86ef105)
-    * references to issues in the comments are replaced with placeholders in this step
-    * the used import API will not run into abuse rate limits in contrast to the normal [Github Issues API](https://developer.github.com/v3/issues/)
-  * post-process all comments to replace the issue reference placeholders with the real Github issue ids using the [Github Comment API](https://developer.github.com/v3/issues/comments/)
+## Labels
 
-## Export JIRA issues
+Every issue type, component and Jira label becomes a lower-cased *candidate* (components get
+`COMPONENT_LABEL_PREFIX`). Each candidate is looked up in the mapping file; unmapped candidates are
+used as they are, an empty mapping value drops the label. If an allow list exists, only labels on it
+are kept. `uv run fetch_labels.py` prints all candidates with counts and the resulting GitHub labels,
+which is the easiest way to write the mapping file:
 
-1. Navigate to Issue search page for project. Issues --> Search for Issues
+```
+# lines starting with # and blank lines are ignored
+bug=bug
+new feature=enhancement
+jira-component:build, packaging and test=component: build
+help-wanted=help wanted
+gsoc2015=
+```
 
-1. Select project you are interested in
+# Running a migration
 
-1. Specify Query criteria, Sort as needed, if you have more than 1000 items use something like eg. ` project = INFRA and issuekey <= INFRA-3000 AND issuekey > INFRA-2000 ORDER BY created DESC` to select a range and export each set into separate XML files
+1. Fetch the issues: `uv run --env-file my.env fetch_issues.py` (or export XML from the Jira UI,
+   max 1000 issues per file)
+2. Check the labels: `uv run --env-file my.env fetch_labels.py`, adjust the mapping file
+3. Dry run against a test repository (with your own token), inspect the result, then clean up with
+   `./reset-migration.sh owner/test-repo` (deletes **all** issues and labels of that repository, so
+   never use it on a real one) and repeat:
 
-1. From results page, click on Export icon at the top right of page
+   ```
+   JIRA_MIGRATION_GITHUB_NAME=me JIRA_MIGRATION_GITHUB_REPO=import-test uv run --env-file my.env main.py
+   ```
+4. Import into the real repository: `uv run --env-file my.env main.py`. If it aborts, just run it
+   again; issues listed in the mapping output file are skipped. Keep that file.
+5. Optionally add epic children to the epics: `./post_process_issues.sh owner repo`
+6. Comment on (and, with `JIRA_CLOSE_TRANSITION`, close) the Jira issues: `uv run --env-file my.env jira_commenter.py --dry-run`, then without
+   `--dry-run`
 
-1. Select XML output and save file
+The import:
+
+* imports the milestones with the [GitHub Milestone API](https://docs.github.com/en/rest/issues/milestones)
+* imports the labels with the [GitHub Label API](https://docs.github.com/en/rest/issues/labels)
+* imports the issues with comments with the [GitHub Issue Import API](https://gist.github.com/jonmagic/5282384165e0f86ef105),
+  which does not run into the abuse rate limits of the regular Issues API
+
+# Exporting Jira issues manually
+
+1. Navigate to Issues --> Search for Issues and select the project
+2. Specify the query; for more than 1000 issues select ranges such as
+   `project = X AND issuekey <= X-3000 AND issuekey > X-2000` and export each into a separate file
+3. Click Export at the top right of the results page, select XML and save the file

@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic Jira XML export, structured like an issues.apache.org search request export. -->
+<rss version="0.92">
+  <channel>
+    <title>Test Jira</title>
+    <link>https://jira.example.org/issues/</link>
+    <issue start="0" end="5" total="5"/>
+
+    <!-- Bug with component, labels, two fix versions, comments, attachments and links -->
+    <item>
+      <title>[TEST-1] Tokenizer drops trailing dots</title>
+      <link>https://jira.example.org/browse/TEST-1</link>
+      <project id="1" key="TEST">Test</project>
+      <description>&lt;p&gt;The tokenizer drops &amp;amp; loses dots.&lt;/p&gt;</description>
+      <environment/>
+      <key id="101">TEST-1</key>
+      <summary>Tokenizer drops trailing dots</summary>
+      <type id="1">Bug</type>
+      <priority id="3">Major</priority>
+      <status id="1" description="open">Open</status>
+      <statusCategory id="2" key="new" colorName="default"/>
+      <resolution id="-1">Unresolved</resolution>
+      <assignee username="alice">Alice Example</assignee>
+      <reporter username="bob">Bob Example</reporter>
+      <labels>
+        <label>help-wanted</label>
+        <label>GSoC</label>
+      </labels>
+      <created>Mon, 3 Nov 2025 10:00:00 +0000</created>
+      <updated>Tue, 4 Nov 2025 11:00:00 +0000</updated>
+      <version>0.9.0</version>
+      <fixVersion> 1.0.0 </fixVersion>
+      <fixVersion>1.1.0</fixVersion>
+      <component>Tokenizer</component>
+      <component>Build, Packaging and Test</component>
+      <comments>
+        <comment id="9001" author="carol" created="Mon, 3 Nov 2025 12:00:00 +0000">&lt;p&gt;Confirmed.&lt;/p&gt;</comment>
+        <comment id="9002" author="alice" created="Tue, 4 Nov 2025 09:00:00 +0000">&lt;p&gt;Working on it, see TEST-2.&lt;/p&gt;</comment>
+      </comments>
+      <issuelinks>
+        <issuelinktype id="10032">
+          <name>Blocker</name>
+          <outwardlinks description="blocks">
+            <issuelink><issuekey id="102">TEST-2</issuekey></issuelink>
+          </outwardlinks>
+        </issuelinktype>
+        <issuelinktype id="10030">
+          <name>Reference</name>
+          <outwardlinks description="relates to">
+            <issuelink><issuekey id="199">TEST-99</issuekey></issuelink>
+          </outwardlinks>
+          <inwardlinks description="is related to">
+            <issuelink><issuekey id="103">TEST-3</issuekey></issuelink>
+          </inwardlinks>
+        </issuelinktype>
+        <issuelinktype id="10001">
+          <name>dependent</name>
+          <outwardlinks description="depends upon">
+            <issuelink><issuekey id="198">TEST-98</issuekey></issuelink>
+          </outwardlinks>
+        </issuelinktype>
+      </issuelinks>
+      <attachments>
+        <attachment id="555" name="stack trace.txt" size="1024" author="bob" created="Mon, 3 Nov 2025 10:05:00 +0000"/>
+        <attachment id="556" name="fix.patch" size="2048" author="alice" created="Tue, 4 Nov 2025 10:05:00 +0000"/>
+      </attachments>
+      <subtasks>
+      </subtasks>
+      <customfields>
+        <customfield id="customfield_1" key="com.atlassian.jira.toolkit:attachments">
+          <customfieldname>Attachment count</customfieldname>
+          <customfieldvalues><customfieldvalue>2.0</customfieldvalue></customfieldvalues>
+        </customfield>
+      </customfields>
+    </item>
+
+    <!-- Improvement: no component, empty labels, empty description, unassigned, part of an epic -->
+    <item>
+      <title>[TEST-2] Improve sentence detector</title>
+      <link>https://jira.example.org/browse/TEST-2</link>
+      <project id="1" key="TEST">Test</project>
+      <description/>
+      <environment/>
+      <key id="102">TEST-2</key>
+      <summary>Improve sentence detector</summary>
+      <type id="4">Improvement</type>
+      <priority id="4">Minor</priority>
+      <status id="1" description="open">Open</status>
+      <statusCategory id="2" key="new" colorName="default"/>
+      <resolution id="-1">Unresolved</resolution>
+      <assignee username="-1">Unassigned</assignee>
+      <reporter username="bob">Bob Example</reporter>
+      <labels>
+      </labels>
+      <created>Wed, 5 Nov 2025 10:00:00 +0000</created>
+      <updated>Wed, 5 Nov 2025 10:00:00 +0000</updated>
+      <issuelinks>
+        <issuelinktype id="10032">
+          <name>Blocker</name>
+          <inwardlinks description="is blocked by">
+            <issuelink><issuekey id="101">TEST-1</issuekey></issuelink>
+          </inwardlinks>
+        </issuelinktype>
+      </issuelinks>
+      <attachments>
+      </attachments>
+      <subtasks>
+      </subtasks>
+      <customfields>
+        <customfield id="customfield_12311120" key="com.pyxis.greenhopper.jira:gh-epic-link">
+          <customfieldname>Epic Link</customfieldname>
+          <customfieldvalues>
+            <customfieldvalue>TEST-3</customfieldvalue>
+          </customfieldvalues>
+        </customfield>
+      </customfields>
+    </item>
+
+    <!-- Epic in progress -->
+    <item>
+      <title>[TEST-3] Modernize pipeline</title>
+      <link>https://jira.example.org/browse/TEST-3</link>
+      <project id="1" key="TEST">Test</project>
+      <description>&lt;p&gt;Umbrella.&lt;/p&gt;</description>
+      <environment/>
+      <key id="103">TEST-3</key>
+      <summary>Modernize pipeline</summary>
+      <type id="13">Epic</type>
+      <priority id="3">Major</priority>
+      <status id="3" description="in progress">In Progress</status>
+      <statusCategory id="4" key="indeterminate" colorName="inprogress"/>
+      <resolution id="-1">Unresolved</resolution>
+      <assignee username="alice">Alice Example</assignee>
+      <reporter username="alice">Alice Example</reporter>
+      <labels>
+      </labels>
+      <created>Thu, 6 Nov 2025 10:00:00 +0000</created>
+      <updated>Thu, 6 Nov 2025 10:00:00 +0000</updated>
+      <fixVersion>2.0.0</fixVersion>
+      <component>Parser</component>
+      <attachments>
+      </attachments>
+      <subtasks>
+        <subtask id="105">TEST-5</subtask>
+      </subtasks>
+      <customfields>
+      </customfields>
+    </item>
+
+    <!-- Minimal, resolved item: no labels/customfields/comments/attachments elements at all -->
+    <item>
+      <title>[TEST-4] Old wish</title>
+      <link>https://jira.example.org/browse/TEST-4</link>
+      <project id="1" key="TEST">Test</project>
+      <description>&lt;p&gt;Done long ago.&lt;/p&gt;</description>
+      <parent id="103">TEST-3</parent>
+      <key id="104">TEST-4</key>
+      <summary>Old wish</summary>
+      <type id="5">Wish</type>
+      <status id="6" description="closed">Closed</status>
+      <statusCategory id="3" key="done" colorName="success"/>
+      <resolution id="1">Fixed</resolution>
+      <assignee username="-1">Unassigned</assignee>
+      <reporter username="dave">Dave Example</reporter>
+      <created>Fri, 7 Nov 2025 10:00:00 +0000</created>
+      <updated>Sat, 8 Nov 2025 10:00:00 +0000</updated>
+      <resolved>Sat, 8 Nov 2025 10:00:00 +0000</resolved>
+    </item>
+
+    <!-- Item of another project: must be skipped -->
+    <item>
+      <title>[OTHER-1] Not ours</title>
+      <link>https://jira.example.org/browse/OTHER-1</link>
+      <project id="2" key="OTHER">Other</project>
+      <description>&lt;p&gt;Nope.&lt;/p&gt;</description>
+      <key id="201">OTHER-1</key>
+      <summary>Not ours</summary>
+      <type id="1">Bug</type>
+      <status id="1" description="open">Open</status>
+      <statusCategory id="2" key="new" colorName="default"/>
+      <assignee username="-1">Unassigned</assignee>
+      <reporter username="eve">Eve Example</reporter>
+      <labels>
+      </labels>
+      <created>Fri, 7 Nov 2025 10:00:00 +0000</created>
+      <updated>Fri, 7 Nov 2025 10:00:00 +0000</updated>
+    </item>
+  </channel>
+</rss>

@@ -81,6 +81,7 @@ celerybeat-schedule
 
 # virtualenv
 venv/
+.venv/
 ENV/
 
 # Spyder project settings
@@ -91,6 +92,13 @@ ENV/
 
 *.xml
 
-labels_mapping.txt
-allowed_labels.txt
-jira-keys-to-github-id.txt
+# working files of a migration (root only; examples/ keep theirs)
+/labels_mapping.txt
+/allowed_labels.txt
+/jira-keys-to-github-id*.txt
+/jira-keys-to-github-id*.txt.commented
+# local env files holding tokens
+*.local.env
+
+# test fixtures are synthetic Jira exports
+!tests/fixtures/*.xml
