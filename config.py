@@ -64,6 +64,10 @@ class Config:
 
     # Jira commenter: template with {key}, {issue_url}, {repo_url}, {issue_number} placeholders
     jira_comment_template_file: str = ''
+    # Jira commenter: if set, each issue is closed with this workflow transition (e.g. "Close Issue")
+    # in the same request as the comment, with the resolution if the transition asks for one
+    jira_close_transition: str = ''
+    jira_close_resolution: str = ''
 
     # Run control
     start_from: int = 0
@@ -119,6 +123,8 @@ _FIELDS = {
     'skip_comment_authors': ('SKIP_COMMENT_AUTHORS', _as_list),
     'max_text_length': ('MAX_TEXT_LENGTH', int),
     'jira_comment_template_file': ('JIRA_COMMENT_TEMPLATE_FILE', str),
+    'jira_close_transition': ('JIRA_CLOSE_TRANSITION', str),
+    'jira_close_resolution': ('JIRA_CLOSE_RESOLUTION', str),
     'start_from': ('START_FROM', int),
     'mapping_output_file': ('MAPPING_OUTPUT_FILE', str),
     'assume_yes': ('ASSUME_YES', _as_bool),

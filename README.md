@@ -56,6 +56,9 @@ for a complete example.
 All settings are environment variables; required ones that are missing are asked for interactively.
 Put the non-secret ones in an env file and run the scripts with `uv run --env-file <file> <script>`.
 Variables already set in the environment take precedence over the env file.
+Quote values containing spaces (`JIRA_MIGRATION_JIRA_CLOSE_TRANSITION="Close Issue"`): uv silently
+ignores unquoted ones. Keep tokens out of the shared env file, e.g. in a second, git-ignored
+`*.local.env` file passed after it (`--env-file my.env --env-file my.local.env`; later files win).
 
 | Variable (`JIRA_MIGRATION_` prefix) | Default | Description |
 |---|---|---|
@@ -81,6 +84,8 @@ Variables already set in the environment take precedence over the env file.
 | `MAX_TEXT_LENGTH` | `60000` | Longer descriptions/comments are truncated (GitHub limit: 65536) |
 | `MAPPING_OUTPUT_FILE` | `jira-keys-to-github-id.txt` | `JIRA-KEY:number` lines written by the import |
 | `JIRA_COMMENT_TEMPLATE_FILE` | built-in text | Comment for `jira_commenter.py`; placeholders `{key}`, `{issue_number}`, `{issue_url}`, `{repo_url}` |
+| `JIRA_CLOSE_TRANSITION` | | If set (e.g. `Close Issue`), `jira_commenter.py` also closes each issue, with the comment in the same request |
+| `JIRA_CLOSE_RESOLUTION` | | Resolution for that transition, e.g. `Auto Closed` |
 | `START_FROM` | `0` | Skip the first N issues (normally not needed, reruns skip imported issues) |
 | `ASSUME_YES` | `false` | Do not wait for confirmation before importing |
 
@@ -116,7 +121,7 @@ gsoc2015=
 4. Import into the real repository: `uv run --env-file my.env main.py`. If it aborts, just run it
    again; issues listed in the mapping output file are skipped. Keep that file.
 5. Optionally add epic children to the epics: `./post_process_issues.sh owner repo`
-6. Comment on the Jira issues: `uv run --env-file my.env jira_commenter.py --dry-run`, then without
+6. Comment on (and, with `JIRA_CLOSE_TRANSITION`, close) the Jira issues: `uv run --env-file my.env jira_commenter.py --dry-run`, then without
    `--dry-run`
 
 The import:
